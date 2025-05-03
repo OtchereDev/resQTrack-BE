@@ -1,0 +1,50 @@
+name: Dockerize and Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main  # Trigger the action when code is pushed to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Cache Docker layers
+      uses: actions/cache@v3
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-
+
+    - name: Log in to Docker Hub
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+    - name: Build Docker Image
+      run: docker build -t sosbackend .
+
+    - name: Tag Docker Image
+      run: docker tag sosbackend otcheredev/sosbackend:latest
+
+    - name: Push Docker Image to Docker Hub
+      run: docker push otcheredev/sosbackend:latest
+
+    - name: Deploy Docker Container on EC2
+      run: |
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
+        chmod 600 key.pem
+        ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "
+          # Remove any incorrect docker-compose.yml directory if it exists
+          [ -d ~/app/docker-compose.yml ] && rm -rf ~/app/docker-compose.yml;
+          # Verify file is now correct
+          ls -l ~/app;
+          # Now run Docker Compose
+          docker-compose -f ~/app/docker-compose.yml pull && docker-compose -f ~/app/docker-compose.yml up -d
+        "
